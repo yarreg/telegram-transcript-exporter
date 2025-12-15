@@ -3,6 +3,31 @@
 Export a Telegram **private chat / group / channel** via **Telethon** into a compact, token-efficient transcript format for LLM analysis.
 
 
+## Installation
+
+### Using pipx (recommended)
+
+```bash
+pipx install git+https://github.com/yarreg/telegram-transcript-exporter.git
+```
+
+After installation, the `telegram-transcript-exporter` command will be available globally.
+
+### Using pip
+
+```bash
+pip install git+https://github.com/yarreg/telegram-transcript-exporter.git
+```
+
+### From source
+
+```bash
+git clone https://github.com/yarreg/telegram-transcript-exporter.git
+cd telegram-transcript-exporter
+pip install -e .
+```
+
+
 ## Usage
 
 The exporter writes a single UTF-8 `.txt` transcript file.

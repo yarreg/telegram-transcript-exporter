@@ -20,6 +20,9 @@ dev = [
     "uv",
 ]
 
+[project.scripts]
+telegram-transcript-exporter = "main:main"
+
 [tool.ruff]
 line-length = 120
 target-version = "py312"
