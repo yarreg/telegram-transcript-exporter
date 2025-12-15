@@ -172,3 +172,24 @@ Media objeccts encoded as special codes:
  ```
  21:40 V:Here is the document you asked for. 📎(file:spec.pdf 2.3MB)
  ```
+
+
+## Known Issues
+
+### Username is `none` for forwarded messages
+
+When exporting forwarded messages, the username of the original author may appear as `none` in the AUTHORS section:
+
+```
+P=Pavel Durov (none) (channel1006503122)
+```
+
+**Causes:**
+
+1. **JSON export (Telegram Desktop):** The Telegram Desktop export format does not include usernames for forwarded message sources — only the display name is available.
+
+2. **Telethon (direct API):** For some forwarded messages, the Telegram API returns limited information about the original sender due to:
+   - Privacy settings of the original author
+   - The source being a private/closed channel
+   - The original account being deleted or restricted
+
