@@ -6,15 +6,9 @@ Uses MessageFactory from conftest.py to create test messages.
 """
 
 import datetime
-import sys
 from datetime import UTC
-from pathlib import Path
 
 import pytest
-
-# Add parent directory to path to import main module
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from telethon.tl.types import MessageMediaDocument, MessageMediaPhoto
 
 from main import (
@@ -490,6 +484,217 @@ class TestTranscriptBuilder:
                 break
 
         assert found_continuation, "Continuation lines should start with space"
+
+    def test_merge_consecutive_messages(self):
+        """Test that consecutive messages from same author within window are merged."""
+        builder = TranscriptBuilder(
+            chat_title="Test",
+            chat_id=1,
+            merge_window_seconds=300,
+        )
+
+        author = Author(user_id=1, display_name="User")
+        builder.add_author(author)
+
+        # Three messages from same author within 5 minutes
+        msg1 = Message(
+            msg_id=1,
+            author_id=1,
+            timestamp=datetime.datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC),
+            text="First message",
+        )
+        msg2 = Message(
+            msg_id=2,
+            author_id=1,
+            timestamp=datetime.datetime(2025, 1, 1, 12, 1, 0, tzinfo=UTC),
+            text="Second message",
+        )
+        msg3 = Message(
+            msg_id=3,
+            author_id=1,
+            timestamp=datetime.datetime(2025, 1, 1, 12, 2, 0, tzinfo=UTC),
+            text="Third message",
+        )
+        builder.add_message(msg1)
+        builder.add_message(msg2)
+        builder.add_message(msg3)
+
+        transcript = builder.build()
+
+        # Merged messages should appear as continuation lines (starting with space)
+        assert " Second message" in transcript
+        assert " Third message" in transcript
+        # Only first message should have timestamp
+        assert "12:00 U:First message" in transcript
+
+    def test_merge_disabled_with_zero_window(self):
+        """Test that merge is disabled when window is 0."""
+        builder = TranscriptBuilder(
+            chat_title="Test",
+            chat_id=1,
+            merge_window_seconds=0,
+        )
+
+        author = Author(user_id=1, display_name="User")
+        builder.add_author(author)
+
+        msg1 = Message(
+            msg_id=1,
+            author_id=1,
+            timestamp=datetime.datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC),
+            text="First message",
+        )
+        msg2 = Message(
+            msg_id=2,
+            author_id=1,
+            timestamp=datetime.datetime(2025, 1, 1, 12, 1, 0, tzinfo=UTC),
+            text="Second message",
+        )
+        builder.add_message(msg1)
+        builder.add_message(msg2)
+
+        transcript = builder.build()
+
+        # Both messages should have their own timestamps
+        assert "12:00 U:First message" in transcript
+        assert "12:01 U:Second message" in transcript
+
+    def test_merge_not_applied_across_day_boundary(self):
+        """Test that merge is reset when crossing day boundary."""
+        builder = TranscriptBuilder(
+            chat_title="Test",
+            chat_id=1,
+            merge_window_seconds=300,
+        )
+
+        author = Author(user_id=1, display_name="User")
+        builder.add_author(author)
+
+        # Message at end of day
+        msg1 = Message(
+            msg_id=1,
+            author_id=1,
+            timestamp=datetime.datetime(2025, 1, 1, 23, 59, 0, tzinfo=UTC),
+            text="End of day",
+        )
+        # Message at start of next day (within 5 minutes but different day)
+        msg2 = Message(
+            msg_id=2,
+            author_id=1,
+            timestamp=datetime.datetime(2025, 1, 2, 0, 1, 0, tzinfo=UTC),
+            text="Start of new day",
+        )
+        builder.add_message(msg1)
+        builder.add_message(msg2)
+
+        transcript = builder.build()
+
+        # Both days should appear as date headers
+        assert "2025-01-01" in transcript
+        assert "2025-01-02" in transcript
+        # Second message should NOT be merged (should have its own timestamp)
+        assert "23:59 U:End of day" in transcript
+        assert "00:01 U:Start of new day" in transcript
+
+    def test_merge_not_applied_for_replies(self):
+        """Test that replies are not merged with previous messages."""
+        builder = TranscriptBuilder(
+            chat_title="Test",
+            chat_id=1,
+            merge_window_seconds=300,
+        )
+
+        author = Author(user_id=1, display_name="User")
+        builder.add_author(author)
+
+        msg1 = Message(
+            msg_id=1,
+            author_id=1,
+            timestamp=datetime.datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC),
+            text="Original message",
+        )
+        msg2 = Message(
+            msg_id=2,
+            author_id=1,
+            timestamp=datetime.datetime(2025, 1, 1, 12, 1, 0, tzinfo=UTC),
+            text="Reply to original",
+            reply_to_msg_id=1,
+        )
+        builder.add_message(msg1)
+        builder.add_message(msg2)
+
+        transcript = builder.build()
+
+        # Reply should not be merged, should have its own line with reply indicator
+        assert "↩1:Reply to original" in transcript
+
+    def test_merge_not_applied_for_forwards(self):
+        """Test that forwards are not merged with previous messages."""
+        builder = TranscriptBuilder(
+            chat_title="Test",
+            chat_id=1,
+            merge_window_seconds=300,
+        )
+
+        author1 = Author(user_id=1, display_name="User")
+        author2 = Author(user_id=2, display_name="Channel", is_channel=True)
+        builder.add_author(author1)
+        builder.add_author(author2)
+
+        msg1 = Message(
+            msg_id=1,
+            author_id=1,
+            timestamp=datetime.datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC),
+            text="Regular message",
+        )
+        msg2 = Message(
+            msg_id=2,
+            author_id=1,
+            timestamp=datetime.datetime(2025, 1, 1, 12, 1, 0, tzinfo=UTC),
+            text="Forwarded content",
+            forwarded_from_id=2,
+        )
+        builder.add_message(msg1)
+        builder.add_message(msg2)
+
+        transcript = builder.build()
+
+        # Forward should not be merged, should have its own line with forward indicator
+        assert "↪C:Forwarded content" in transcript
+
+    def test_merge_different_authors_not_merged(self):
+        """Test that messages from different authors are not merged."""
+        builder = TranscriptBuilder(
+            chat_title="Test",
+            chat_id=1,
+            merge_window_seconds=300,
+        )
+
+        author1 = Author(user_id=1, display_name="User One")
+        author2 = Author(user_id=2, display_name="User Two")
+        builder.add_author(author1)
+        builder.add_author(author2)
+
+        msg1 = Message(
+            msg_id=1,
+            author_id=1,
+            timestamp=datetime.datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC),
+            text="From user one",
+        )
+        msg2 = Message(
+            msg_id=2,
+            author_id=2,
+            timestamp=datetime.datetime(2025, 1, 1, 12, 1, 0, tzinfo=UTC),
+            text="From user two",
+        )
+        builder.add_message(msg1)
+        builder.add_message(msg2)
+
+        transcript = builder.build()
+
+        # Both should have timestamps (not merged)
+        assert "12:00 U:From user one" in transcript
+        assert "12:01 US:From user two" in transcript
 
 
 class TestMessageFactory:
