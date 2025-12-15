@@ -820,9 +820,7 @@ async def async_main(args: argparse.Namespace) -> int:
             from_date = datetime.strptime(args.from_date, "%Y-%m-%d").replace(tzinfo=UTC)
         if args.to_date:
             # Set to end of day for inclusive filtering
-            to_date = datetime.strptime(args.to_date, "%Y-%m-%d").replace(
-                hour=23, minute=59, second=59, tzinfo=UTC
-            )
+            to_date = datetime.strptime(args.to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59, tzinfo=UTC)
 
         builder = await export_from_telethon(
             client,
@@ -957,9 +955,7 @@ def main() -> int:
             from_date = datetime.strptime(args.from_date, "%Y-%m-%d").replace(tzinfo=UTC)
         if args.to_date:
             # Set to end of day for inclusive filtering
-            to_date = datetime.strptime(args.to_date, "%Y-%m-%d").replace(
-                hour=23, minute=59, second=59, tzinfo=UTC
-            )
+            to_date = datetime.strptime(args.to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59, tzinfo=UTC)
 
         print(f"Parsing JSON export: {json_path}")
         builder = parse_json_export(

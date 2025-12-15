@@ -393,8 +393,6 @@ def factory_with_date():
         hour: int = 12,
         minute: int = 0,
     ) -> MessageFactory:
-        return MessageFactory(
-            base_date=datetime.datetime(year, month, day, hour, minute, 0, tzinfo=UTC)
-        )
+        return MessageFactory(base_date=datetime.datetime(year, month, day, hour, minute, 0, tzinfo=UTC))
 
     return _factory
