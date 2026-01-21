@@ -84,7 +84,19 @@ When exporting directly from Telegram, you also need to specify the **target** d
 - numeric id
 - dialog title (as shown in your Telegram dialog list)
 
-(Use the tool’s `--help` to see whether your repo expects this as `--target <...>` or a positional argument.)
+Use `--target <identifier>` to specify the target.
+
+#### Forum topics (supergroups with topics)
+
+For forums/supergroups with topics enabled, you can export a specific topic by appending the topic ID to the target:
+
+- `--target=<chat_id>/<topic_id>`
+
+Examples:
+- `--target=-1001875939239/40264` — export topic 40264 from forum with ID -1001875939239
+- `--target=@mychat/12345` — export topic 12345 from forum @mychat
+
+To discover available topics in a forum, use the `--search` command (see below). Topics will be listed with their IDs.
 
 #### Search dialogs / peer hints (`--search`)
 
@@ -93,7 +105,18 @@ If you don’t know the exact target identifier, use:
 - `--search "<query>"`
 
 This searches dialogs (by title/username/name) and prints peer hints that you can copy into the next run as the target.
+**For forums (supergroups with topics):**
+- The search will also scan and list available topics within each matching forum
+- Use the displayed topic_id with the target format described above to export specific topics
 
+Example output:
+```
+[Forum] Chat @dogchat (id=-1001875939)
+  Topics:
+    - Questions (topic_id=40264)
+    - Answers (topic_id=40268)
+    - ...
+```
 
 ## Transcript format
 The output is a single `.txt` file with the following structure:

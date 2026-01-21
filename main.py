@@ -19,6 +19,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+from telethon.tl.functions.messages import GetForumTopicsRequest
 from telethon.tl.types import (
     Channel,
     Chat,
@@ -509,6 +510,40 @@ def parse_json_export(
 # =============================================================================
 
 
+async def get_forum_topics(client, entity: Channel) -> dict[int, str]:
+    """Get forum topics for a channel.
+    
+    Args:
+        client: Telegram client
+        entity: Channel entity (must be a forum)
+    
+    Returns:
+        Dictionary mapping topic_id to topic_title
+    """
+    forum_topics = {}
+    try:
+        # Get forum topics using official API
+        result = await client(GetForumTopicsRequest(
+            peer=entity,
+            offset_date=None,
+            offset_id=0,
+            offset_topic=0,
+            limit=100
+        ))
+        
+        # Process forum topics from result
+        if hasattr(result, 'topics'):
+            for topic in result.topics:
+                # Topics are ForumTopic objects with id and title
+                if hasattr(topic, 'id') and hasattr(topic, 'title'):
+                    forum_topics[topic.id] = topic.title
+    except Exception:
+        # Silently skip forums where we can't get topics
+        pass
+    
+    return forum_topics
+
+
 async def search_dialogs(client, query: str) -> None:
     """Search dialogs and print matching results."""
     print(f"Searching for dialogs matching: {query}")
@@ -522,32 +557,88 @@ async def search_dialogs(client, query: str) -> None:
         title = dialog.title or dialog.name or ""
         username = getattr(entity, "username", None)
 
-        # Check if query matches
-        matches = False
-        if query_lower in title.lower():
-            matches = True
-        if username and query_lower in username.lower():
-            matches = True
+        # Check if query matches dialog title/username
+        dialog_matches = (
+            query_lower in title.lower()
+            or (username and query_lower in username.lower())
+        )
 
-        if matches:
-            found += 1
+        # Check if entity is a forum
+        is_forum = (
+            isinstance(entity, Channel)
+            and not entity.broadcast
+            and getattr(entity, "forum", False)
+        )
+
+        # For forums, find matching topics
+        forum_topics = {}
+        matching_topic_ids: set[int] = set()
+        if is_forum:
+            forum_topics = await get_forum_topics(client, entity)
+            matching_topic_ids = {
+                tid for tid, t_title in forum_topics.items()
+                if query_lower in t_title.lower()
+            }
+
+        # Skip if nothing matches
+        if not dialog_matches and not matching_topic_ids:
+            continue
+
+        found += 1
+
+        # Determine entity type
+        if isinstance(entity, User):
+            entity_type = "User"
+        elif isinstance(entity, Chat):
+            entity_type = "Group"
+        elif isinstance(entity, Channel):
+            if entity.broadcast:
+                entity_type = "Channel"
+            elif is_forum:
+                entity_type = "Forum"
+            else:
+                entity_type = "Supergroup"
+        else:
             entity_type = "Unknown"
-            entity_id = dialog.id
 
-            if isinstance(entity, User):
-                entity_type = "User"
-            elif isinstance(entity, Chat):
-                entity_type = "Group"
-            elif isinstance(entity, Channel):
-                entity_type = "Channel" if entity.broadcast else "Supergroup"
+        username_str = f"@{username}" if username else ""
+        print(f"  [{entity_type}] {title} {username_str} (id={dialog.id})")
 
-            username_str = f"@{username}" if username else ""
-            print(f"  [{entity_type}] {title} {username_str} (id={entity_id})")
+        # If it's a forum with topics, list them
+        if is_forum and forum_topics:
+            print("    Topics:")
+            # Show all topics if dialog matches, otherwise only matching topics
+            topics_to_show = forum_topics if dialog_matches else {
+                tid: forum_topics[tid] for tid in matching_topic_ids
+            }
+            for topic_id, topic_title in topics_to_show.items():
+                print(f"      - {topic_title} (topic_id={topic_id})")
 
     print("-" * 60)
     print(f"Found {found} matching dialog(s)")
     if found > 0:
         print("\nUse one of the above as --target (id, @username, or title)")
+
+
+def parse_target_string(target: str) -> tuple[str, int | None]:
+    """Parse target string and extract topic_id if present.
+    
+    Supports format: target/topic_id
+    Examples: -1001875939239/40264, @username/12345
+    
+    Returns:
+        tuple: (base_target, topic_id or None)
+    """
+    if "/" in target:
+        parts = target.rsplit("/", 1)
+        if len(parts) == 2:
+            base_target, topic_str = parts
+            try:
+                topic_id = int(topic_str)
+                return base_target, topic_id
+            except ValueError:
+                pass
+    return target, None
 
 
 async def resolve_target(client, target: str):
@@ -584,6 +675,7 @@ async def export_from_telethon(
     max_messages: int | None = None,
     from_date: datetime | None = None,
     to_date: datetime | None = None,
+    topic_id: int | None = None,
 ) -> TranscriptBuilder:
     """Export chat from Telegram using Telethon."""
     entity = await resolve_target(client, target)
@@ -623,6 +715,10 @@ async def export_from_telethon(
     # Use offset_date if to_date is specified (messages before this date)
     if to_date:
         iter_kwargs["offset_date"] = to_date
+
+    # Add topic filter if specified (for forum groups)
+    if topic_id:
+        iter_kwargs["reply_to"] = topic_id
 
     # If no date filters and only max_messages, use limit directly for efficiency
     if max_messages and not from_date and not to_date:
@@ -813,6 +909,9 @@ async def async_main(args: argparse.Namespace) -> int:
             print("Error: --target is required when not using --search")
             return 1
 
+        # Parse target string to extract topic_id if present
+        base_target, topic_id = parse_target_string(args.target)
+
         # Parse date filters
         from_date = None
         to_date = None
@@ -824,13 +923,14 @@ async def async_main(args: argparse.Namespace) -> int:
 
         builder = await export_from_telethon(
             client,
-            args.target,
+            base_target,
             include_seconds=args.include_seconds,
             merge_window_seconds=args.merge_window_seconds,
             encode_links=not args.no_link_encoding,
             max_messages=args.max_messages,
             from_date=from_date,
             to_date=to_date,
+            topic_id=topic_id,
         )
 
         # Write output
@@ -880,7 +980,7 @@ def main() -> int:
     telethon_group.add_argument(
         "--target",
         type=str,
-        help="Target chat: @username, t.me/... link, numeric ID, or dialog title",
+        help="Target chat: @username, t.me/... link, numeric ID, or dialog title. For forum topics use: target/topic_id (e.g., -1001875939239/40264)",
     )
     telethon_group.add_argument(
         "--search",
